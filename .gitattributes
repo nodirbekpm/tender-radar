@@ -1,0 +1,4 @@
+# Keep shell scripts and the entrypoint LF so they run inside Linux containers.
+*.sh text eol=lf
+docker/entrypoint.sh text eol=lf
+docker/wait_for_db.py text eol=lf

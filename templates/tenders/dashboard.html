@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Tender Radar{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-semibold mb-6">Dashboard</h1>
+
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+  <div class="bg-white border border-slate-200 rounded-xl p-5">
+    <div class="text-sm text-slate-400">Jami tenderlar</div>
+    <div class="text-3xl font-semibold mt-1">{{ stats.total }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-xl p-5">
+    <div class="text-sm text-slate-400">Ko‘rinadigan manbalar</div>
+    <div class="text-3xl font-semibold mt-1">{{ stats.sources.count }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-xl p-5">
+    <div class="text-sm text-slate-400">Umumiy NMC qiymati</div>
+    <div class="text-2xl font-semibold mt-1">{% if stats.total_value %}{{ stats.total_value|floatformat:0 }} ₽{% else %}—{% endif %}</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-white border border-slate-200 rounded-xl p-5">
+    <h2 class="font-semibold mb-3">Manbalar bo‘yicha</h2>
+    <ul class="space-y-2 text-sm">
+      {% for row in stats.by_source %}
+      <li class="flex justify-between"><span>{{ row.source__name }}</span><span class="font-medium">{{ row.n }}</span></li>
+      {% empty %}<li class="text-slate-400">Ma’lumot yo‘q</li>{% endfor %}
+    </ul>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-xl p-5">
+    <h2 class="font-semibold mb-3">So‘nggi tenderlar</h2>
+    <ul class="divide-y divide-slate-100 text-sm">
+      {% for t in stats.latest %}
+      <li class="py-2">
+        <a href="{% url 'tenders:detail' t.pk %}" class="text-brand-700 hover:underline">{{ t.title|truncatechars:70 }}</a>
+        <div class="text-xs text-slate-400">{{ t.source.name }} · {{ t.published_at|date:"Y-m-d"|default:"—" }}</div>
+      </li>
+      {% empty %}<li class="py-2 text-slate-400">Ma’lumot yo‘q</li>{% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

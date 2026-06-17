@@ -1,0 +1,56 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru" class="h-full bg-slate-50">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Tender Radar{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: { 600: '#2563eb', 700: '#1d4ed8' } } } } }
+  </script>
+</head>
+<body class="h-full text-slate-800">
+<div class="min-h-full flex flex-col">
+  <header class="bg-white border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
+      <a href="{% url 'tenders:list' %}" class="flex items-center gap-2 font-semibold text-lg">
+        <span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-white">TR</span>
+        Tender Radar
+      </a>
+      {% if user.is_authenticated %}
+      <nav class="flex items-center gap-4 text-sm">
+        <a href="{% url 'tenders:dashboard' %}" class="text-slate-600 hover:text-brand-700">Dashboard</a>
+        <a href="{% url 'tenders:list' %}" class="text-slate-600 hover:text-brand-700">Tenders</a>
+        {% if user.is_staff %}<a href="/admin/" class="text-slate-600 hover:text-brand-700">Admin</a>{% endif %}
+        <span class="text-slate-400">|</span>
+        <span class="text-slate-500">{{ user.username }}</span>
+        <form action="{% url 'accounts:logout' %}" method="post" class="inline">
+          {% csrf_token %}
+          <button type="submit" class="text-brand-700 hover:underline">Chiqish</button>
+        </form>
+      </nav>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if messages %}
+  <div class="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 mt-4 space-y-2">
+    {% for message in messages %}
+    <div class="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-sm text-blue-800">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="border-t border-slate-200 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 text-xs text-slate-400">
+      Tender Radar — MVP. Manbalar foydalanuvchi ruxsatiga ko‘ra ko‘rsatiladi.
+    </div>
+  </footer>
+</div>
+</body>
+</html>

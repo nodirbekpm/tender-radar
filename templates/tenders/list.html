@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Tenderlar — Tender Radar{% endblock %}
+
+{% block content %}
+<style>
+  .filter-form input, .filter-form select {
+    width: 100%; border: 1px solid #cbd5e1; border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem; font-size: 0.875rem; background: #fff;
+  }
+  .filter-form input:focus, .filter-form select:focus {
+    outline: none; border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb;
+  }
+  .filter-form label { font-size: 0.75rem; font-weight: 600; color: #475569; display:block; margin-bottom: 0.25rem; }
+</style>
+
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-semibold">Tenderlar</h1>
+  <div class="text-sm text-slate-500">
+    Topildi: <span class="font-semibold text-slate-700">{{ total_count }}</span>
+    · Ko‘rinadigan manbalar: {{ visible_source_count }}
+  </div>
+</div>
+
+{% if visible_source_count == 0 %}
+<div class="rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 mb-4">
+  Sizga hali birorta manba ruxsati berilmagan. Administrator bilan bog‘laning.
+</div>
+{% endif %}
+
+<form method="get" class="filter-form bg-white border border-slate-200 rounded-xl p-4 mb-6">
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="lg:col-span-2">
+      <label for="{{ filter.form.q.id_for_label }}">Kalit so‘z (nomi, mijoz, raqam)</label>
+      {{ filter.form.q }}
+    </div>
+    <div>
+      <label for="{{ filter.form.source.id_for_label }}">Manba</label>
+      {{ filter.form.source }}
+    </div>
+    <div>
+      <label for="{{ filter.form.fz_type.id_for_label }}">FZ turi</label>
+      {{ filter.form.fz_type }}
+    </div>
+    <div>
+      <label for="{{ filter.form.region.id_for_label }}">Region</label>
+      {{ filter.form.region }}
+    </div>
+    <div>
+      <label for="{{ filter.form.price_min.id_for_label }}">Narx (min)</label>
+      {{ filter.form.price_min }}
+    </div>
+    <div>
+      <label for="{{ filter.form.price_max.id_for_label }}">Narx (max)</label>
+      {{ filter.form.price_max }}
+    </div>
+    <div class="flex items-end gap-2">
+      <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white rounded-md px-4 py-2 text-sm font-medium">Filtrlash</button>
+      <a href="{% url 'tenders:list' %}" class="text-sm text-slate-500 hover:text-slate-700 py-2">Tozalash</a>
+    </div>
+  </div>
+</form>
+
+<div class="bg-white border border-slate-200 rounded-xl overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50 text-slate-500 text-left">
+        <tr>
+          <th class="px-4 py-3 font-medium">Raqam / Manba</th>
+          <th class="px-4 py-3 font-medium">Nomi</th>
+          <th class="px-4 py-3 font-medium">FZ</th>
+          <th class="px-4 py-3 font-medium">
+            <a href="?{{ base_query }}&ordering={% if ordering == '-price' %}price{% else %}-price{% endif %}" class="hover:text-brand-700">Narx ⇅</a>
+          </th>
+          <th class="px-4 py-3 font-medium">Region</th>
+          <th class="px-4 py-3 font-medium">
+            <a href="?{{ base_query }}&ordering={% if ordering == '-published_at' %}published_at{% else %}-published_at{% endif %}" class="hover:text-brand-700">E‘lon sanasi ⇅</a>
+          </th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for tender in page_obj %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-4 py-3 whitespace-nowrap">
+            <a href="{% url 'tenders:detail' tender.pk %}" class="text-brand-700 font-medium hover:underline">{{ tender.number|default:tender.external_id }}</a>
+            <div class="text-xs text-slate-400">{{ tender.source.name }}</div>
+          </td>
+          <td class="px-4 py-3 max-w-md">
+            <a href="{% url 'tenders:detail' tender.pk %}" class="hover:underline">{{ tender.title|truncatechars:90 }}</a>
+            {% if tender.customer %}<div class="text-xs text-slate-400">{{ tender.customer|truncatechars:60 }}</div>{% endif %}
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">
+            {% if tender.fz_type %}<span class="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs">{{ tender.get_fz_type_display }}</span>{% else %}<span class="text-slate-300">—</span>{% endif %}
+          </td>
+          <td class="px-4 py-3 whitespace-nowrap">{% if tender.price %}{{ tender.price|floatformat:0 }}{% else %}<span class="text-slate-300">—</span>{% endif %}</td>
+          <td class="px-4 py-3">{{ tender.region|default:"—"|truncatechars:30 }}</td>
+          <td class="px-4 py-3 whitespace-nowrap text-slate-500">{{ tender.published_at|date:"Y-m-d H:i"|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" class="px-4 py-10 text-center text-slate-400">Hech narsa topilmadi.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="flex items-center justify-between mt-4 text-sm">
+  <div class="text-slate-500">Sahifa {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</div>
+  <div class="flex gap-1">
+    {% if page_obj.has_previous %}
+      <a href="?{{ base_query }}&page={{ page_obj.previous_page_number }}" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50">Oldingi</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+      <a href="?{{ base_query }}&page={{ page_obj.next_page_number }}" class="px-3 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50">Keyingi</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

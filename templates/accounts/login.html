@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Kirish — Tender Radar{% endblock %}
+{% block content %}
+<div class="max-w-md mx-auto mt-10 bg-white rounded-xl border border-slate-200 shadow-sm p-8">
+  <h1 class="text-xl font-semibold mb-1">Tizimga kirish</h1>
+  <p class="text-sm text-slate-500 mb-6">Login va parolingizni kiriting.</p>
+
+  {% if form.errors %}
+  <div class="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700 mb-4">
+    Login yoki parol noto‘g‘ri.
+  </div>
+  {% endif %}
+
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <div>
+      <label class="block text-sm font-medium mb-1" for="id_username">Login</label>
+      <input id="id_username" name="username" type="text" required autofocus
+             class="w-full rounded-md border border-slate-300 px-3 py-2 focus:border-brand-600 focus:ring-1 focus:ring-brand-600 outline-none">
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1" for="id_password">Parol</label>
+      <input id="id_password" name="password" type="password" required
+             class="w-full rounded-md border border-slate-300 px-3 py-2 focus:border-brand-600 focus:ring-1 focus:ring-brand-600 outline-none">
+    </div>
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit"
+            class="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-md py-2 font-medium">
+      Kirish
+    </button>
+  </form>
+</div>
+{% endblock %}

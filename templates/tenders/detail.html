@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ tender.number|default:tender.external_id }} — Tender Radar{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'tenders:list' %}" class="text-sm text-brand-700 hover:underline">← Ro‘yxatga qaytish</a>
+</div>
+
+<div class="bg-white border border-slate-200 rounded-xl p-6">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="inline-flex rounded-full bg-brand-600/10 text-brand-700 px-2 py-0.5 text-xs font-medium">{{ tender.source.name }}</span>
+        {% if tender.fz_type %}<span class="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs">{{ tender.get_fz_type_display }}</span>{% endif %}
+      </div>
+      <h1 class="text-xl font-semibold">{{ tender.title }}</h1>
+      <p class="text-sm text-slate-500 mt-1">№ {{ tender.number|default:tender.external_id }}</p>
+    </div>
+    {% if tender.url %}
+    <a href="{{ tender.url }}" target="_blank" rel="noopener"
+       class="shrink-0 bg-brand-600 hover:bg-brand-700 text-white rounded-md px-4 py-2 text-sm font-medium">Manbada ochish ↗</a>
+    {% endif %}
+  </div>
+
+  <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4 mt-6 text-sm">
+    <div><dt class="text-slate-400">Mijoz (Заказчик)</dt><dd class="mt-0.5">{{ tender.customer|default:"—" }}</dd></div>
+    <div><dt class="text-slate-400">Boshlang‘ich narx (НМЦ)</dt><dd class="mt-0.5">{% if tender.price %}{{ tender.price|floatformat:2 }} ₽{% else %}—{% endif %}</dd></div>
+    <div><dt class="text-slate-400">Region</dt><dd class="mt-0.5">{{ tender.region|default:"—" }}</dd></div>
+    <div><dt class="text-slate-400">Qonun</dt><dd class="mt-0.5">{{ tender.get_fz_type_display|default:"—" }}</dd></div>
+    <div><dt class="text-slate-400">E‘lon sanasi</dt><dd class="mt-0.5">{{ tender.published_at|date:"Y-m-d H:i"|default:"—" }}</dd></div>
+    <div><dt class="text-slate-400">Tugash muddati</dt><dd class="mt-0.5">{{ tender.deadline_at|date:"Y-m-d H:i"|default:"—" }}</dd></div>
+  </dl>
+
+  <div class="mt-8">
+    <h2 class="text-sm font-semibold text-slate-600 mb-2">Hujjatlar</h2>
+    {% if tender.documents.all %}
+    <ul class="space-y-1 text-sm">
+      {% for doc in tender.documents.all %}
+      <li><a href="{{ doc.url }}" target="_blank" rel="noopener" class="text-brand-700 hover:underline">📄 {{ doc.title|default:doc.url }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-slate-400">Hujjatlar mavjud emas.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
