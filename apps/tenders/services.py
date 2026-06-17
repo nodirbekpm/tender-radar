@@ -38,11 +38,18 @@ def download_document(document: TenderDocument) -> bool:
     if document.is_downloaded and document.file:
         return False
     try:
+        proxy = getattr(settings, "HTTP_PROXY_URL", "")
         resp = requests.get(
             document.url,
             timeout=settings.HTTP_TIMEOUT_SECONDS,
             stream=True,
-            headers={"User-Agent": "tender-radar/1.0"},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                ),
+            },
+            proxies={"http": proxy, "https": proxy} if proxy else None,
         )
         resp.raise_for_status()
 

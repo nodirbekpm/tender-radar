@@ -71,18 +71,35 @@ class BaseSource(ABC):
 
     # -- HTTP helpers (shared retry/timeout policy) -------------------------
 
+    # Browser-like headers — EIS and most ETPs drop unknown/bot clients.
+    BROWSER_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+    }
+
+    def _proxies(self) -> dict | None:
+        """Optional proxy (e.g. a Russia-exit proxy) from settings.
+
+        Lets the collector reach geo-restricted platforms when the host itself
+        has no direct route (browser-only VPN, foreign server, etc.).
+        """
+        proxy = getattr(settings, "HTTP_PROXY_URL", "")
+        return {"http": proxy, "https": proxy} if proxy else None
+
     def _session(self) -> requests.Session:
         session = requests.Session()
-        session.headers.update(
-            {
-                "User-Agent": "tender-radar/1.0 (+https://example.local)",
-                "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
-            }
-        )
+        session.headers.update(self.BROWSER_HEADERS)
+        proxies = self._proxies()
+        if proxies:
+            session.proxies.update(proxies)
         return session
 
     def http_get(self, url: str, **kwargs) -> requests.Response:
-        """GET with a shared timeout + exponential-backoff retry policy.
+        """GET with browser headers, optional proxy, timeout + retry policy.
 
         Retries only on transient network/5xx errors. Raises
         :class:`SourceFetchError` after retries are exhausted so callers have

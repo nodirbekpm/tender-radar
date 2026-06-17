@@ -173,6 +173,9 @@ CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 # ---------------------------------------------------------------------------
 HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "20"))
 HTTP_MAX_RETRIES = int(os.environ.get("HTTP_MAX_RETRIES", "3"))
+# Optional proxy for geo-restricted sources, e.g. http://user:pass@host:port
+# or socks5://host:port (needs `requests[socks]`). Empty = direct connection.
+HTTP_PROXY_URL = os.environ.get("HTTP_PROXY_URL", "")
 TENDER_FETCH_PAGE_SIZE = int(os.environ.get("TENDER_FETCH_PAGE_SIZE", "30"))
 TENDER_FETCH_CRON_MINUTE = os.environ.get("TENDER_FETCH_CRON_MINUTE", "0")
 TENDER_FETCH_CRON_HOUR = os.environ.get("TENDER_FETCH_CRON_HOUR", "*")
