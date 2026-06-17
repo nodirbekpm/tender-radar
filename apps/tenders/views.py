@@ -6,10 +6,13 @@ lack permission for — enforced at the queryset level, not just the template.
 """
 from __future__ import annotations
 
+from django.contrib import messages
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import Count, Sum
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_POST
 
 from apps.sources.permissions import visible_sources
 
@@ -90,3 +93,26 @@ def dashboard(request):
         "latest": qs.order_by("-first_seen_at")[:10],
     }
     return render(request, "tenders/dashboard.html", {"stats": stats})
+
+
+@staff_member_required
+@require_POST
+def scan_now(request):
+    """Trigger a collection run on demand (staff only).
+
+    Enqueues the Celery task so it runs in the worker; falls back to running
+    synchronously if the broker is unreachable.
+    """
+    from .tasks import collect_all_sources
+
+    try:
+        collect_all_sources.delay()
+        messages.success(request, "Scan started in the background. Refresh in a moment.")
+    except Exception:  # noqa: BLE001 — broker down: run inline as a fallback
+        summary = collect_all_sources()
+        messages.success(
+            request,
+            f"Scan finished: {summary['created']} new, {summary['updated']} updated "
+            f"({summary['ok']}/{summary['sources']} sources ok).",
+        )
+    return redirect("tenders:dashboard")

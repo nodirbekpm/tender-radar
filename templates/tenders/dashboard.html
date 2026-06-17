@@ -8,7 +8,15 @@
     <h1 class="text-2xl font-semibold">Dashboard</h1>
     <p class="text-sm text-slate-500 mt-0.5">Overview of collected tenders across your authorized platforms.</p>
   </div>
-  <a href="{% url 'tenders:list' %}" class="text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 font-medium shadow-sm">Browse tenders →</a>
+  <div class="flex items-center gap-2">
+    {% if user.is_staff %}
+    <form action="{% url 'tenders:scan_now' %}" method="post">
+      {% csrf_token %}
+      <button type="submit" class="text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-4 py-2 font-medium shadow-sm">↻ Scan now</button>
+    </form>
+    {% endif %}
+    <a href="{% url 'tenders:list' %}" class="text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-4 py-2 font-medium shadow-sm">Browse tenders →</a>
+  </div>
 </div>
 
 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
