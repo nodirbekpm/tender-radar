@@ -1,36 +1,36 @@
-"""EIS (zakupki.gov.ru) adapter — the primary, fully-implemented source.
+"""EIS (zakupki.gov.ru) adapter — primary, fully-implemented source.
 
-Strategy: the EIS extended-search page exposes a public **RSS** export
-(``.../epz/order/extendedsearch/rss.html``). RSS is a stable, documented,
-captcha-free surface — far more robust to parse than the JS-heavy HTML pages.
-We pull the 44-FZ and 223-FZ feeds separately so each tender is correctly
-tagged, then normalize each RSS ``<item>`` into a :class:`NormalizedTender`.
+Pipeline (verified against the live site):
 
-Every parsing step is defensive: a malformed item is logged and skipped,
+1. **Search results page** ``/epz/order/extendedsearch/results.html`` returns
+   static HTML cards (``.search-registry-entry-block``) for 44-/223-FZ. Each
+   card carries the real fields: registry number + notice URL, object/title,
+   customer (Заказчик), initial price (Начальная цена), publish/deadline dates
+   and a link to the documents tab.
+2. **Documents page** ``.../view/documents.html?regNumber=…`` lists real
+   attachments (ТЗ, contract draft, NMC justification) as ``filestore``
+   download links — these are the actual files we then store locally.
+
+Everything is defensive: a malformed card/attachment is logged and skipped,
 never crashing the whole fetch.
 """
 from __future__ import annotations
 
-import html
 import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qs, urlparse
-from xml.etree import ElementTree as ET
+from urllib.parse import parse_qs, urljoin, urlparse
+
+from bs4 import BeautifulSoup
 
 from .base import BaseSource, NormalizedTender, SourceFetchError
 from .registry import register
 
 logger = logging.getLogger("apps.sources")
 
-RSS_BASE = "https://zakupki.gov.ru/epz/order/extendedsearch/rss.html"
-
-# Labels EIS uses inside the RSS <description> block (best-effort extraction).
-_PRICE_LABELS = ("Начальная цена контракта", "Начальная (максимальная) цена", "Цена")
-_CUSTOMER_LABELS = ("Заказчик", "Организация, осуществляющая размещение")
-_REGION_LABELS = ("Регион", "Место нахождения")
+BASE = "https://zakupki.gov.ru"
+RESULTS_URL = f"{BASE}/epz/order/extendedsearch/results.html"
 
 
 @register
@@ -39,8 +39,11 @@ class EISSource(BaseSource):
     label = "ЕИС (zakupki.gov.ru)"
     implemented = True
 
-    # Which FZ feeds to pull. Each maps to the RSS query flag EIS expects.
+    # Each FZ maps to the results-page query flag.
     _FEEDS = (("44", "fz44"), ("223", "fz223"))
+
+    # Enrich each tender with its real attachment files (extra request/tender).
+    enrich_documents = True
 
     def fetch(self, limit: int = 30) -> list[NormalizedTender]:
         per_feed = max(1, limit // len(self._FEEDS))
@@ -51,14 +54,16 @@ class EISSource(BaseSource):
             try:
                 tenders.extend(self._fetch_feed(fz_type, flag, per_feed))
             except SourceFetchError as exc:
-                # Isolate failures per-feed so 223-FZ still works if 44-FZ breaks.
                 logger.warning("EIS feed %s-FZ failed: %s", fz_type, exc)
                 errors.append(str(exc))
 
         if not tenders and errors:
-            raise SourceFetchError(
-                "All EIS feeds failed: " + "; ".join(errors)
-            )
+            raise SourceFetchError("All EIS feeds failed: " + "; ".join(errors))
+
+        if self.enrich_documents:
+            for tender in tenders:
+                self._enrich_documents(tender)
+
         logger.info("EIS fetch: %d tenders collected", len(tenders))
         return tenders[:limit]
 
@@ -66,128 +71,165 @@ class EISSource(BaseSource):
 
     def _fetch_feed(self, fz_type: str, flag: str, count: int) -> list[NormalizedTender]:
         url = (
-            f"{RSS_BASE}?{flag}=on&pageNumber=1&sortDirection=false"
+            f"{RESULTS_URL}?{flag}=on&pageNumber=1&sortDirection=false"
             f"&recordsPerPage=_{count}&sortBy=UPDATE_DATE&searchString="
         )
-        response = self.http_get(url)
-        return self._parse_rss(response.content, fz_type)
+        html = self.http_get(url).text
+        return self._parse_results(html, fz_type)
 
-    def _parse_rss(self, content: bytes, fz_type: str) -> list[NormalizedTender]:
-        try:
-            root = ET.fromstring(content)
-        except ET.ParseError as exc:
-            raise SourceFetchError(f"EIS returned non-XML payload: {exc}") from exc
-
-        items = root.findall(".//item")
+    def _parse_results(self, html: str, fz_type: str) -> list[NormalizedTender]:
+        soup = BeautifulSoup(html, "html.parser")
+        cards = soup.select(".search-registry-entry-block")
         result: list[NormalizedTender] = []
-        for item in items:
+        for card in cards:
             try:
-                tender = self._parse_item(item, fz_type)
+                tender = self._parse_card(card, fz_type)
                 if tender is not None:
                     result.append(tender)
-            except Exception as exc:  # noqa: BLE001 — one bad item must not kill the feed
-                logger.warning("Skipping malformed EIS item: %s", exc)
+            except Exception as exc:  # noqa: BLE001 — one bad card mustn't kill the feed
+                logger.warning("Skipping malformed EIS card: %s", exc)
         return result
 
-    def _parse_item(self, item: ET.Element, fz_type: str) -> NormalizedTender | None:
-        title = self._text(item, "title")
-        link = self._text(item, "link")
-        guid = self._text(item, "guid")
-        description = html.unescape(self._text(item, "description"))
-        pub_raw = self._text(item, "pubDate")
-
-        reg_number = self._extract_reg_number(link) or self._extract_reg_number(guid)
-        external_id = reg_number or guid or link
-        if not external_id:
+    def _parse_card(self, card, fz_type: str) -> NormalizedTender | None:
+        number_link = card.select_one(".registry-entry__header-mid__number a")
+        notice_url = self._clean_href(number_link.get("href", "").strip()) if number_link else ""
+        reg_number = self._reg_number(notice_url) or (
+            self._text(number_link).replace("№", "").strip() if number_link else ""
+        )
+        if not reg_number:
             return None
 
-        return NormalizedTender(
-            external_id=external_id,
-            number=reg_number or "",
-            title=self._clean_title(title) or "(без названия)",
-            customer=self._extract_label(description, _CUSTOMER_LABELS),
-            price=self._extract_price(description),
-            region=self._extract_label(description, _REGION_LABELS),
-            fz_type=fz_type,
-            url=link,
-            published_at=self._parse_date(pub_raw),
-            deadline_at=None,  # EIS RSS rarely exposes deadline; left for detail enrichment
-            documents=[],
-            raw={"title": title, "description": description, "link": link},
+        title = (
+            self._block_value(card, "Объект закупки")
+            or self._text(card.select_one(".registry-entry__header-mid__title"))
+            or "(без названия)"
         )
+        customer = self._customer(card)
+        price = self._parse_money(self._text(card.select_one(".price-block__value")))
+        published_at = self._card_date(card, "Размещено")
+        deadline_at = self._card_date(card, "Окончание подачи заявок")
+        documents_url = self._documents_url(card)
+
+        return NormalizedTender(
+            external_id=reg_number,
+            number=reg_number,
+            title=title,
+            customer=customer,
+            price=price,
+            region="",  # not on the results card; can be enriched from detail later
+            fz_type=fz_type,
+            url=urljoin(BASE, notice_url) if notice_url else "",
+            published_at=published_at,
+            deadline_at=deadline_at,
+            documents=[],
+            raw={"documents_url": documents_url, "notice_url": notice_url},
+        )
+
+    def _enrich_documents(self, tender: NormalizedTender) -> None:
+        """Fetch the documents tab and attach real file links. Best-effort."""
+        documents_url = (tender.raw or {}).get("documents_url")
+        if not documents_url:
+            return
+        try:
+            html = self.http_get(urljoin(BASE, documents_url)).text
+        except SourceFetchError as exc:
+            logger.info("Documents fetch failed for %s: %s", tender.external_id, exc)
+            return
+        soup = BeautifulSoup(html, "html.parser")
+        docs: list[dict] = []
+        for link in soup.select(".attachment a[href*='filestore']"):
+            href = link.get("href", "").strip()
+            if not href:
+                continue
+            name = (link.get("title") or self._text(link) or "").strip()
+            docs.append({"title": name[:500], "url": urljoin(BASE, href)})
+        if docs:
+            tender.documents = docs
 
     # ------------------------- parsing helpers ------------------------- #
 
     @staticmethod
-    def _text(item: ET.Element, tag: str) -> str:
-        el = item.find(tag)
-        return (el.text or "").strip() if el is not None and el.text else ""
+    def _text(node) -> str:
+        return re.sub(r"\s+", " ", node.get_text()).strip() if node else ""
 
     @staticmethod
-    def _extract_reg_number(url: str) -> str:
+    def _reg_number(url: str) -> str:
         if not url:
             return ""
         params = parse_qs(urlparse(url).query)
         for key in ("regNumber", "regnumber", "noticeInfoId"):
-            if key in params and params[key]:
+            if params.get(key):
                 return params[key][0]
-        # Sometimes the number appears as a long digit run in the path.
-        match = re.search(r"(\d{11,})", url)
-        return match.group(1) if match else ""
-
-    @staticmethod
-    def _clean_title(title: str) -> str:
-        # Titles often start with "№ 0123... " — keep it, just collapse whitespace.
-        return re.sub(r"\s+", " ", html.unescape(title)).strip()
-
-    @staticmethod
-    def _extract_label(description: str, labels: tuple[str, ...]) -> str:
-        for label in labels:
-            # Match "Label: value" up to the next label-like break or line end.
-            pattern = rf"{re.escape(label)}\s*[:：]\s*(.+?)(?:<br|\n|;|$)"
-            match = re.search(pattern, description, flags=re.IGNORECASE)
-            if match:
-                value = re.sub(r"<[^>]+>", "", match.group(1)).strip()
-                if value:
-                    return value[:500]
         return ""
 
-    @classmethod
-    def _extract_price(cls, description: str) -> Decimal | None:
-        """Parse a Russian-formatted money string into a Decimal.
+    def _block_value(self, card, title: str) -> str:
+        """Return the value of a body-block whose title matches ``title``."""
+        for block in card.select(".registry-entry__body-block"):
+            t = block.select_one(".registry-entry__body-title")
+            if t and self._text(t) == title:
+                value = block.select_one(".registry-entry__body-value")
+                return self._text(value)
+        return ""
 
-        Russian locale: space/dot are thousand separators, comma is the
-        decimal separator, e.g. "1 234 567,89 руб." → 1234567.89.
+    def _customer(self, card) -> str:
+        for block in card.select(".registry-entry__body-block"):
+            t = block.select_one(".registry-entry__body-title")
+            if t and self._text(t) == "Заказчик":
+                href = block.select_one(".registry-entry__body-href")
+                return self._text(href)
+        return ""
+
+    def _card_date(self, card, label: str):
+        # Pair each title node with the next value node in document order;
+        # this handles both column-wrapped and bare title/value layouts.
+        for title in card.select(".data-block__title"):
+            if self._text(title) == label:
+                value = title.find_next(class_="data-block__value")
+                if value is not None:
+                    return self._parse_date(self._text(value))
+        return None
+
+    def _documents_url(self, card) -> str:
+        link = card.select_one("a[href*='/documents.html']")
+        return self._clean_href(link.get("href", "").strip()) if link else ""
+
+    @staticmethod
+    def _clean_href(href: str) -> str:
+        """Undo HTML entity decoding inside query strings.
+
+        The HTML parser turns ``&notice...`` into ``¬ice...`` (``&not`` is the
+        ¬ entity), corrupting 223-FZ document links. Restore the literal text.
         """
-        raw = cls._extract_label(description, _PRICE_LABELS)
-        if not raw:
+        return href.replace("\xac", "&not") if href else href
+
+    @staticmethod
+    def _parse_money(text: str) -> Decimal | None:
+        """Parse Russian money like '1 234 567,89 ₽' → Decimal('1234567.89')."""
+        if not text:
             return None
-        cleaned = raw.replace("\xa0", " ")
-        # Grab the first number-like run (digits/spaces/dots, optional ,decimals);
-        # this naturally stops before trailing units like "руб.".
+        cleaned = text.replace("\xa0", " ")
         match = re.search(r"\d[\d .]*(?:,\d+)?", cleaned)
         if not match:
             return None
         num = match.group(0).replace(" ", "")
-        if "," in num:
-            num = num.replace(".", "").replace(",", ".")  # dots = thousands, comma = decimal
-        else:
-            num = num.replace(".", "")  # only thousand separators present
-        if not num:
-            return None
+        num = num.replace(".", "").replace(",", ".") if "," in num else num.replace(".", "")
         try:
-            return Decimal(num)
+            return Decimal(num) if num else None
         except (InvalidOperation, ValueError):
             return None
 
     @staticmethod
-    def _parse_date(raw: str) -> datetime | None:
-        if not raw:
+    def _parse_date(text: str):
+        if not text:
             return None
+        match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", text)
+        if not match:
+            return None
+        day, month, year = (int(g) for g in match.groups())
         try:
-            dt = parsedate_to_datetime(raw)
-        except (TypeError, ValueError):
+            return datetime(year, month, day, tzinfo=timezone.utc)
+        except ValueError:
             return None
-        if dt is not None and dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+
+    # Back-compat alias used by the offline price test.
+    _extract_price = _parse_money
