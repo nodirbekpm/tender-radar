@@ -189,7 +189,26 @@ _SAMPLES: dict[str, list[dict]] = {
 }
 
 
-def _build(entry: dict) -> NormalizedTender:
+# Real public URL patterns per platform (built from the tender's id).
+_URL_BUILDERS = {
+    "eis": lambda e: (
+        "https://zakupki.gov.ru/epz/order/notice/ea44/view/common-info.html?regNumber="
+        + e["external_id"]
+        if e.get("fz_type") == "44"
+        else "https://zakupki.gov.ru/epz/order/notice/notice223/common-info.html?noticeInfoId="
+        + e["external_id"]
+    ),
+    "sberbank_ast": lambda e: f"https://www.sberbank-ast.ru/purchaseview.aspx?id={e['external_id']}",
+    "rts_tender": lambda e: f"https://www.rts-tender.ru/poizk/zakupki/{e['external_id']}",
+    "b2b_center": lambda e: f"https://www.b2b-center.ru/market/view.html?id={e['external_id']}",
+    "fabrikant": lambda e: f"https://www.fabrikant.ru/trades/procedure/?id={e['external_id']}",
+    "otc": lambda e: f"https://otc.ru/tender/{e['external_id']}",
+}
+
+
+def _build(code: str, entry: dict) -> NormalizedTender:
+    url_builder = _URL_BUILDERS.get(code)
+    url = url_builder(entry) if url_builder else entry.get("url", "")
     return NormalizedTender(
         external_id=entry["external_id"],
         number=entry.get("number", ""),
@@ -198,7 +217,7 @@ def _build(entry: dict) -> NormalizedTender:
         price=entry.get("price"),
         region=entry.get("region", ""),
         fz_type=entry.get("fz_type", ""),
-        url=f"https://example.local/tender/{entry['external_id']}",
+        url=url,
         published_at=_dt(entry.get("days", 1)),
         deadline_at=_dt(entry.get("deadline", -7)),
         documents=[{"title": t, "url": u} for (t, u) in entry.get("docs", [])],
@@ -206,7 +225,7 @@ def _build(entry: dict) -> NormalizedTender:
 
 
 def sample_tenders_for(code: str) -> list[NormalizedTender]:
-    return [_build(e) for e in _SAMPLES.get(code, [])]
+    return [_build(code, e) for e in _SAMPLES.get(code, [])]
 
 
 def eis_sample_tenders() -> list[NormalizedTender]:
