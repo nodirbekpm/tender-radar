@@ -78,11 +78,12 @@ def test_registry_has_eis_and_stubs():
     assert "b2b_center" in keys
 
 
-def test_stub_not_implemented():
+def test_commercial_adapter_returns_sample_data():
     adapter_cls = get_adapter("b2b_center")
-    assert adapter_cls.implemented is False
-    with pytest.raises(NotImplementedError):
-        adapter_cls().fetch()
+    assert adapter_cls.implemented is True
+    tenders = adapter_cls().fetch(limit=10)
+    assert len(tenders) >= 1
+    assert all(t.external_id for t in tenders)
 
 
 def test_eis_fetch_uses_http(monkeypatch):

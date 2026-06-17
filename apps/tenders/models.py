@@ -61,8 +61,16 @@ class Tender(models.Model):
         return f"[{self.source.code}] {self.number or self.external_id}"
 
 
+def tender_document_path(instance, filename: str) -> str:
+    return f"tender_docs/{instance.tender_id}/{filename}"
+
+
 class TenderDocument(models.Model):
-    """A raw document/attachment link associated with a tender."""
+    """A document/attachment (e.g. ТЗ) associated with a tender.
+
+    ``url`` is the source link; ``file`` holds the copy we downloaded into our
+    own storage so the documentation survives even if the source removes it.
+    """
 
     tender = models.ForeignKey(
         Tender,
@@ -71,6 +79,14 @@ class TenderDocument(models.Model):
     )
     title = models.CharField(max_length=500, blank=True)
     url = models.URLField(max_length=1000)
+
+    # Locally stored copy of the document.
+    file = models.FileField(upload_to=tender_document_path, blank=True, null=True)
+    is_downloaded = models.BooleanField(default=False)
+    content_type = models.CharField(max_length=200, blank=True)
+    file_size = models.PositiveBigIntegerField(null=True, blank=True)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    download_error = models.CharField(max_length=300, blank=True)
 
     class Meta:
         constraints = [

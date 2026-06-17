@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.humanize",
     # third party
     "rest_framework",
     "django_filters",
@@ -128,6 +129,9 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
@@ -172,6 +176,11 @@ HTTP_MAX_RETRIES = int(os.environ.get("HTTP_MAX_RETRIES", "3"))
 TENDER_FETCH_PAGE_SIZE = int(os.environ.get("TENDER_FETCH_PAGE_SIZE", "30"))
 TENDER_FETCH_CRON_MINUTE = os.environ.get("TENDER_FETCH_CRON_MINUTE", "0")
 TENDER_FETCH_CRON_HOUR = os.environ.get("TENDER_FETCH_CRON_HOUR", "*")
+
+# Download tender documents (ТЗ etc.) into our own storage during collection.
+DOWNLOAD_DOCUMENTS = env_bool("DOWNLOAD_DOCUMENTS", True)
+# Skip files larger than this (bytes) to protect storage. Default 25 MB.
+DOCUMENT_MAX_BYTES = int(os.environ.get("DOCUMENT_MAX_BYTES", str(25 * 1024 * 1024)))
 
 # ---------------------------------------------------------------------------
 # Telegram (optional)

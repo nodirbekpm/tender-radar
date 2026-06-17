@@ -77,11 +77,13 @@ def tender_detail(request, pk: int):
 def dashboard(request):
     sources = visible_sources(request.user)
     qs = _visible_tenders(request.user)
+    by_source = list(
+        qs.values("source_id", "source__name").annotate(n=Count("id")).order_by("-n")
+    )
     stats = {
         "total": qs.count(),
-        "by_source": list(
-            qs.values("source__name").annotate(n=Count("id")).order_by("-n")
-        ),
+        "by_source": by_source,
+        "max_source_n": max((row["n"] for row in by_source), default=1),
         "by_fz": list(qs.values("fz_type").annotate(n=Count("id")).order_by("-n")),
         "total_value": qs.aggregate(s=Sum("price"))["s"],
         "sources": sources,

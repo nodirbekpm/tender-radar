@@ -6,9 +6,15 @@ the Celery task interchangeably.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
+from urllib.parse import unquote, urlparse
 
+import requests
+from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import transaction
+from django.utils import timezone
 
 from apps.sources.adapters import NormalizedTender, SourceFetchError, get_adapter
 from apps.sources.models import Source
@@ -16,6 +22,57 @@ from apps.sources.models import Source
 from .models import Tender, TenderDocument
 
 logger = logging.getLogger("apps.tenders")
+
+
+def _filename_from(url: str, fallback: str) -> str:
+    name = os.path.basename(urlparse(unquote(url)).path) or fallback
+    return name[:200]
+
+
+def download_document(document: TenderDocument) -> bool:
+    """Download a document's file into our own storage. Best-effort, never raises.
+
+    Returns True if a file was stored. Skips if already downloaded, oversized,
+    or unreachable (recording the error for visibility).
+    """
+    if document.is_downloaded and document.file:
+        return False
+    try:
+        resp = requests.get(
+            document.url,
+            timeout=settings.HTTP_TIMEOUT_SECONDS,
+            stream=True,
+            headers={"User-Agent": "tender-radar/1.0"},
+        )
+        resp.raise_for_status()
+
+        max_bytes = settings.DOCUMENT_MAX_BYTES
+        chunks, total = [], 0
+        for chunk in resp.iter_content(chunk_size=65536):
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError(f"document exceeds {max_bytes} bytes")
+            chunks.append(chunk)
+        content = b"".join(chunks)
+
+        filename = _filename_from(document.url, fallback=f"doc-{document.pk}")
+        document.file.save(filename, ContentFile(content), save=False)
+        document.is_downloaded = True
+        document.content_type = resp.headers.get("Content-Type", "")[:200]
+        document.file_size = total
+        document.fetched_at = timezone.now()
+        document.download_error = ""
+        document.save(update_fields=[
+            "file", "is_downloaded", "content_type", "file_size",
+            "fetched_at", "download_error",
+        ])
+        logger.info("Downloaded document %s (%d bytes)", document.url, total)
+        return True
+    except (requests.RequestException, ValueError, OSError) as exc:
+        document.download_error = str(exc)[:300]
+        document.save(update_fields=["download_error"])
+        logger.warning("Document download failed for %s: %s", document.url, exc)
+        return False
 
 
 @dataclass
@@ -60,6 +117,22 @@ def upsert_tender(source: Source, item: NormalizedTender) -> bool:
     return created
 
 
+def _download_pending_documents(source: Source, cap: int = 100) -> None:
+    """Download documents for this source that haven't been fetched yet.
+
+    Only touches docs with no prior error so a permanently-broken link isn't
+    retried every run. Isolated: a failed download never breaks collection.
+    """
+    pending = TenderDocument.objects.filter(
+        tender__source=source, is_downloaded=False, download_error=""
+    )[:cap]
+    for document in pending:
+        try:
+            download_document(document)
+        except Exception as exc:  # noqa: BLE001 — total isolation
+            logger.exception("Unexpected document download error: %s", exc)
+
+
 def collect_from_source(source: Source, limit: int) -> SourceResult:
     """Fetch + persist a single source in isolation.
 
@@ -95,6 +168,10 @@ def collect_from_source(source: Source, limit: int) -> SourceResult:
                     result.updated += 1
             except Exception as exc:  # noqa: BLE001 — skip a bad record, keep going
                 logger.exception("Failed to persist tender from '%s': %s", source.code, exc)
+
+        if settings.DOWNLOAD_DOCUMENTS:
+            _download_pending_documents(source)
+
         logger.info(
             "Source '%s': fetched=%d created=%d updated=%d",
             source.code, result.fetched, result.created, result.updated,

@@ -19,7 +19,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.sources.adapters import registered_keys, get_adapter
-from apps.sources.adapters.sample_data import eis_sample_tenders
+from apps.sources.adapters.sample_data import sample_tenders_for
 from apps.sources.models import Source, UserSourcePermission
 from apps.tenders.services import collect_from_source, upsert_tender
 
@@ -47,8 +47,8 @@ class Command(BaseCommand):
         self.stdout.write("Setting up periodic collection task ...")
         self._seed_periodic_task()
 
-        self.stdout.write("Collecting EIS tenders ...")
-        self._seed_tenders(sources["eis"])
+        self.stdout.write("Collecting tenders from all sources ...")
+        self._seed_tenders(sources)
 
         self.stdout.write(self.style.SUCCESS("Demo seed complete."))
         self.stdout.write(
@@ -122,23 +122,26 @@ class Command(BaseCommand):
             },
         )
 
-    def _seed_tenders(self, eis: Source):
-        result = collect_from_source(eis, limit=settings.TENDER_FETCH_PAGE_SIZE)
-        if result.ok and result.fetched > 0:
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"  Live EIS fetch: {result.created} new, {result.updated} updated."
-                )
-            )
-            return
+    def _seed_tenders(self, sources: dict[str, Source]):
+        for code, source in sources.items():
+            if code == "eis":
+                # EIS has a live public feed — try it first.
+                result = collect_from_source(source, limit=settings.TENDER_FETCH_PAGE_SIZE)
+                if result.ok and result.fetched > 0:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"  [eis] live fetch: {result.created} new, {result.updated} updated."
+                    ))
+                    continue
+                self.stdout.write(self.style.WARNING(
+                    "  [eis] live fetch returned nothing — loading sample tenders."
+                ))
+            # Commercial ETPs (and EIS offline fallback): load curated samples.
+            self._load_samples(code, source)
 
-        self.stdout.write(
-            self.style.WARNING(
-                "  Live EIS fetch returned nothing"
-                + (f" ({result.error})" if result.error else "")
-                + " — loading bundled sample tenders."
-            )
-        )
+    def _load_samples(self, code: str, source: Source):
+        items = sample_tenders_for(code)
+        if not items:
+            return
         with transaction.atomic():
-            count = sum(1 for item in eis_sample_tenders() if upsert_tender(eis, item))
-        self.stdout.write(self.style.SUCCESS(f"  Loaded {count} sample EIS tenders."))
+            count = sum(1 for item in items if upsert_tender(source, item))
+        self.stdout.write(self.style.SUCCESS(f"  [{code}] loaded {count} sample tenders."))

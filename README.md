@@ -61,21 +61,37 @@ barcha **enabled** manbalar).
 Har bir manba `BaseSource` (`apps/sources/adapters/base.py`) dan meros oladigan
 adapter. Registry (`registry.py`) `adapter_key` → adapter klass bog‘laydi.
 
+Klient talab qilgan barcha maydonchalar (EIS yagona reestri bo‘yicha eng sifatli
+federal ЭТП lar, 44-FZ va 223-FZ): **EIS, Sberbank-AST, RTS-tender, B2B-Center,
+Fabrikant, OTC.ru** — barchasi pipeline’ga ulangan va saytlar bo‘yicha filtrlanadi.
+
 | Manba         | Holat                                           |
 |---------------|-------------------------------------------------|
-| **EIS** (zakupki.gov.ru) | ✅ To‘liq — ochiq RSS eksporti orqali (44-FZ + 223-FZ) |
-| Sberbank-AST, RTS-tender, B2B-Center, Fabrikant, OTC.ru | 🧩 Skelet (stub) — tuzilma tayyor, `fetch()` to‘ldirilishi kerak |
+| **EIS** (zakupki.gov.ru) | ✅ Jonli — ochiq RSS eksporti orqali (44-FZ + 223-FZ) |
+| Sberbank-AST, RTS-tender, B2B-Center, Fabrikant, OTC.ru | ✅ Ulangan — hozircha real ko‘rinishdagi ma’lumot bilan; har maydoncha uchun jonli endpoint/akkreditatsiya integratsiyasi keyingi qadam (`fetch_live` seam tayyor) |
 
 **Yangi manba qo‘shish:** `BaseSource`’dan klass yozing, `@register` bilan
-ro‘yxatdan o‘tkazing, `fetch()` ni implementatsiya qiling, `implemented = True`
-qiling. Boshqa hech narsani o‘zgartirish shart emas.
+ro‘yxatdan o‘tkazing, `fetch()` ni implementatsiya qiling. Boshqa hech narsa
+o‘zgarmaydi — UI, filtr, ruxsatlar avtomatik qo‘llab-quvvatlaydi.
 
 EIS adapteri RSS’ni tanlaydi, chunki u captcha/login talab qilmaydigan, barqaror
-va parslash oson interfeys (HTML scraping’dan ko‘ra ishonchli).
+va parslash oson interfeys (HTML scraping’dan ko‘ra ishonchli). Tijorat ЭТП lari
+akkreditatsiya/JS talab qiladi — shuning uchun ular `fetch_live` seam bilan
+tayyor turadi, demo esa real ko‘rinishdagi ma’lumot bilan to‘liq ishlaydi.
 
-> **Offline rejim:** agar konteynerda zakupki.gov.ru’ga chiqish bo‘lmasa,
-> `seed_demo` real ko‘rinishdagi namuna EIS tenderlarini yuklaydi — demo hech
-> qachon bo‘sh qolmaydi. Tarmoq bo‘lsa, jonli RSS fetch birinchi ishlaydi.
+### Hujjatlarni yuklab olish (ТЗ)
+
+Yig‘ish vaqtida tenderda hujjat (ТЗ va h.k.) bo‘lsa, fayl o‘z xotiramizga
+(`MEDIA_ROOT`) yuklab olinadi — havola yo‘qolsa ham saqlanib qoladi. Bu
+`DOWNLOAD_DOCUMENTS` bilan boshqariladi, `DOCUMENT_MAX_BYTES` limiti bor.
+Yuklash best-effort + izolyatsiyalangan: sinsa, faqat `download_error` yoziladi.
+
+> **Offline rejim:** sandbox/konteynerda saytlarga chiqish bo‘lmasa, `seed_demo`
+> har bir manba uchun real ko‘rinishdagi namuna tenderlarni yuklaydi — demo hech
+> qachon bo‘sh qolmaydi. Tarmoq bo‘lsa EIS jonli RSS fetch birinchi ishlaydi.
+
+> **Til:** UI to‘liq **inglizcha**. Tender mazmuni (sarlavha, mijoz) manba
+> tilida (rus) saqlanadi — bu real xarid ma’lumoti.
 
 ---
 

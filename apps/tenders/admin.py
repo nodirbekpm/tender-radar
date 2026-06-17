@@ -6,6 +6,8 @@ from .models import Tender, TenderDocument
 class TenderDocumentInline(admin.TabularInline):
     model = TenderDocument
     extra = 0
+    readonly_fields = ("is_downloaded", "content_type", "file_size", "fetched_at", "download_error")
+    fields = ("title", "url", "file", "is_downloaded", "file_size", "fetched_at", "download_error")
 
 
 @admin.register(Tender)
