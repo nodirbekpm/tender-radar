@@ -106,6 +106,32 @@ Yuklash best-effort + izolyatsiyalangan: sinsa, faqat `download_error` yoziladi.
 
 ---
 
+## Real ma’lumot yig’ish (host + VPN, Docker’siz) ⭐
+
+zakupki.gov.ru faqat **Rossiya IP**’dan kiradi va **Docker konteynerlari host
+VPN’idan o’tmaydi**. Shuning uchun real jonli yig’ishni **host’da** (tizim
+darajasidagi RU VPN yoqilgan) Docker’siz ishlating — nol infratuzilma (SQLite):
+
+```bash
+python -m venv .venv && .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Tizim VPN (OpenVPN, RU) yoqilgan bo’lsin. Tekshirish:
+#   curl https://zakupki.gov.ru   → ochilishi kerak
+
+set USE_SQLITE=1
+set DJANGO_SECRET_KEY=dev
+set DOWNLOAD_DOCUMENTS=1
+python manage.py migrate
+python manage.py collect --source eis --limit 10   # jonli real EIS + fayllar
+python manage.py runserver
+```
+
+So’ng http://127.0.0.1:8000 — real tenderlar, real narx/mijoz/sana va yuklab
+olingan real ТЗ fayllari ko’rinadi. Avtomatik yig’ish uchun Celery beat (quyida)
+yoki `collect` ni rejaga qo’ying. Ishlab chiqarishda eng ishonchli — **RU VPS**:
+u yerda Docker ham to’g’ridan-to’g’ri zakupki’ga chiqadi, hammasi 24/7 ishlaydi.
+
 ## Lokal ishga tushirish (Docker’siz)
 
 ```bash

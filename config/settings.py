@@ -89,17 +89,27 @@ ASGI_APPLICATION = "config.asgi.application"
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "tenderradar"),
-        "USER": os.environ.get("POSTGRES_USER", "tenderradar"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "tenderradar"),
-        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
+# USE_SQLITE=1 runs the whole app with zero infrastructure (no Docker/Postgres)
+# — handy for a host-side live run where collection must use the machine's VPN.
+if env_bool("USE_SQLITE", False):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("POSTGRES_DB", "tenderradar"),
+            "USER": os.environ.get("POSTGRES_USER", "tenderradar"),
+            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "tenderradar"),
+            "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+        }
+    }
 
 # ---------------------------------------------------------------------------
 # Auth
