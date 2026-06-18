@@ -204,17 +204,31 @@ class EISSource(BaseSource):
 
     @staticmethod
     def _parse_money(text: str) -> Decimal | None:
-        """Parse Russian money like '1 234 567,89 ₽' → Decimal('1234567.89')."""
+        """Parse Russian money into a Decimal.
+
+        EIS uses spaces for thousands and a comma for the fractional part,
+        e.g. '13 704 946,33 ₽' → 13704946.33. We strip the thousands spaces,
+        then treat the single remaining separator — comma OR dot — as the
+        decimal point. Critically, a lone '.' is the decimal separator, NOT a
+        thousands mark (dropping it would multiply the price ~100x).
+        """
         if not text:
             return None
         cleaned = text.replace("\xa0", " ")
-        match = re.search(r"\d[\d .]*(?:,\d+)?", cleaned)
+        match = re.search(r"\d[\d \xa0.,]*", cleaned)
         if not match:
             return None
-        num = match.group(0).replace(" ", "")
-        num = num.replace(".", "").replace(",", ".") if "," in num else num.replace(".", "")
+        num = match.group(0).replace(" ", "").strip(".,")
+        if not num:
+            return None
+        # Thousands spaces are already gone; unify the decimal separator.
+        num = num.replace(",", ".")
+        # Guard against a (non-EIS) dotted-thousands form: keep only the last dot.
+        if num.count(".") > 1:
+            head, _, tail = num.rpartition(".")
+            num = head.replace(".", "") + "." + tail
         try:
-            return Decimal(num) if num else None
+            return Decimal(num)
         except (InvalidOperation, ValueError):
             return None
 

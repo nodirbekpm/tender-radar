@@ -67,7 +67,11 @@ def test_eis_parses_results_card():
 def test_eis_money_parsing_variants():
     assert EISSource._parse_money("1 234 567,89 ₽") == Decimal("1234567.89")
     assert EISSource._parse_money("189 680,00 ₽") == Decimal("189680.00")
+    assert EISSource._parse_money("13 704 946,33 ₽") == Decimal("13704946.33")
+    # A lone dot is the decimal separator, not a thousands mark (no 100x bug).
+    assert EISSource._parse_money("13 704 946.33 ₽") == Decimal("13704946.33")
     assert EISSource._parse_money("52500") == Decimal("52500")
+    assert EISSource._parse_money("1 000 000 ₽") == Decimal("1000000")
     assert EISSource._parse_money("нет") is None
 
 
