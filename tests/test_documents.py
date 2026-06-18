@@ -39,6 +39,20 @@ def test_download_document_records_error_on_failure(eis_source):
 
 
 @responses.activate
+def test_download_uses_real_title_as_filename(eis_source):
+    # EIS filestore URLs end in 'file.html'; the real name lives in the title.
+    doc = _doc(eis_source, url="https://zakupki.gov.ru/44fz/filestore/.../file.html?uid=ABC")
+    doc.title = "Обоснование НМЦК.xlsx"
+    doc.save()
+    responses.add(responses.GET, doc.url, body=b"data", status=200)
+    assert download_document(doc) is True
+    doc.refresh_from_db()
+    assert doc.file.name.endswith(".xlsx")
+    assert "file.html" not in doc.file.name
+    doc.file.delete(save=False)
+
+
+@responses.activate
 def test_download_document_respects_size_limit(eis_source, settings):
     settings.DOCUMENT_MAX_BYTES = 10
     doc = _doc(eis_source, url="https://example.com/big.pdf")

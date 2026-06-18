@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import unquote, urlparse
 
@@ -27,6 +28,15 @@ logger = logging.getLogger("apps.tenders")
 def _filename_from(url: str, fallback: str) -> str:
     name = os.path.basename(urlparse(unquote(url)).path) or fallback
     return name[:200]
+
+
+def _resolve_filename(document) -> str:
+    """Prefer the document's real title (it carries the proper name+extension,
+    e.g. 'Обоснование НМЦК.xlsx'); EIS filestore URLs only end in 'file.html'."""
+    title = (document.title or "").strip()
+    if title and re.search(r"\.[A-Za-z0-9]{2,5}$", title):
+        return re.sub(r'[\\/:*?"<>|]+', "_", title)[:200]
+    return _filename_from(document.url, fallback=f"doc-{document.pk}")
 
 
 def download_document(document: TenderDocument) -> bool:
@@ -62,7 +72,7 @@ def download_document(document: TenderDocument) -> bool:
             chunks.append(chunk)
         content = b"".join(chunks)
 
-        filename = _filename_from(document.url, fallback=f"doc-{document.pk}")
+        filename = _resolve_filename(document)
         document.file.save(filename, ContentFile(content), save=False)
         document.is_downloaded = True
         document.content_type = resp.headers.get("Content-Type", "")[:200]
