@@ -1,191 +1,222 @@
-# Tender Radar — MVP (1-bosqich)
+# Tender Radar — MVP (Stage 1)
 
-Davlat va tijorat xarid maydonchalaridan tenderlarni avtomatik yig‘adigan,
-foydalanuvchi ruxsatlari (per-source permissions) bilan boshqariladigan veb-platforma.
+A web platform that automatically collects tenders from government and
+commercial procurement marketplaces, with per-user, per-source access control.
 
 - **Backend:** Django 5 + DRF
 - **DB:** PostgreSQL
-- **Fon vazifalar:** Celery + Redis (+ celery-beat — soatlik yig‘ish)
-- **Frontend:** Django templates + Tailwind CSS (yengil, responsiv)
-- **Konteyner:** Docker Compose (bitta buyruq bilan ko‘tariladi)
-- **Testlar:** pytest + pytest-django
+- **Background jobs:** Celery + Redis (+ celery-beat — hourly collection)
+- **Frontend:** Django templates + Tailwind CSS (lightweight, responsive)
+- **Container:** Docker Compose (one command to bring everything up)
+- **Tests:** pytest + pytest-django
+
+> **Scope:** this repo is **Stage 1 — collection & parsing only**. Scoring,
+> AI document audit and CRM integration are future stages.
 
 ---
 
-## Tez ishga tushirish (Docker)
+## Quick start (Docker)
 
 ```bash
-# 1. Konfiguratsiya
-cp .env.example .env          # kerak bo‘lsa qiymatlarni o‘zgartiring
+# 1. Configure
+cp .env.example .env          # adjust values if needed
 
-# 2. Stack’ni ko‘tarish (web + db + redis + celery worker + beat)
+# 2. Bring up the stack (web + db + redis + celery worker + beat)
 docker compose up --build -d
 
-# 3. Demo ma’lumotni yuklash (manbalar, userlar, ruxsatlar, beat task, tenderlar)
+# 3. Load demo data (sources, users, permissions, beat task, tenders)
 docker compose exec web python manage.py seed_demo
 ```
 
-Brauzerda oching: **http://localhost:8000**
+Open in the browser: **http://localhost:8000**
 
-### Demo loginlar
+> **Important:** Docker containers do **not** route through a host VPN, and
+> zakupki.gov.ru only accepts **Russian IPs**. For real live data, see
+> [Real data collection](#real-data-collection-host--vpn) below.
 
-| Rol    | Login   | Parol        | Ko‘radigan manbalar              |
-|--------|---------|--------------|----------------------------------|
-| Admin  | `admin` | `admin12345` | Hammasi + admin panel (`/admin/`)|
-| Test   | `demo`  | `demo12345`  | **Faqat EIS**                    |
+### Demo logins
 
-> Admin parolini `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_PASSWORD`
-> env orqali o‘zgartirish mumkin (seeddan oldin).
+| Role  | Login   | Password     | Visible sources                  |
+|-------|---------|--------------|----------------------------------|
+| Admin | `admin` | `admin12345` | All + admin panel (`/admin/`)    |
+| Test  | `demo`  | `demo12345`  | **EIS only**                     |
 
----
-
-## Ruxsatlar tizimi (asosiy g‘oya)
-
-Har bir foydalanuvchi **faqat o‘ziga ruxsat berilgan manbalarning** tenderlarini
-ko‘radi. Bu `sources.UserSourcePermission` (user ↔ source) orqali amalga oshadi.
-
-- Demo user boshida **faqat EIS** ko‘radi.
-- Admin yangi manbani yoqish uchun:
-  `/admin/` → **Users** → demo userni oching → pastdagi *“Source access”*
-  inline’da kerakli manbani qo‘shing (masalan **B2B-Center**). Saqlangach,
-  demo user endi o‘sha manbani ham ko‘radi.
-
-Ruxsat tekshiruvi `apps/sources/permissions.py` da bitta joyda — HTML view’lar,
-detail sahifa va REST API barchasi shu qoidaga bo‘ysunadi (superuser/staff =
-barcha **enabled** manbalar).
+> The admin password can be set via the `DJANGO_SUPERUSER_USERNAME` /
+> `DJANGO_SUPERUSER_PASSWORD` env vars (before seeding).
 
 ---
 
-## Ma’lumot manbalari (plugin/adapter arxitekturasi)
+## Permission system (core idea)
 
-Har bir manba `BaseSource` (`apps/sources/adapters/base.py`) dan meros oladigan
-adapter. Registry (`registry.py`) `adapter_key` → adapter klass bog‘laydi.
+Each user sees tenders **only from the sources they are granted**. This is
+implemented via `sources.UserSourcePermission` (user ↔ source).
 
-Klient talab qilgan barcha maydonchalar (EIS yagona reestri bo‘yicha eng sifatli
-federal ЭТП lar, 44-FZ va 223-FZ): **EIS, Sberbank-AST, RTS-tender, B2B-Center,
-Fabrikant, OTC.ru** — barchasi pipeline’ga ulangan va saytlar bo‘yicha filtrlanadi.
+- The demo user starts with **EIS only**.
+- To grant a new source: `/admin/` → **Users** → open the demo user → in the
+  *“Source access”* inline at the bottom, add the source (e.g. **B2B-Center**).
+  After saving, the demo user can see that source too.
 
-| Manba         | Holat                                           |
+The permission check lives in one place — `apps/sources/permissions.py` — so the
+HTML views, the detail page and the REST API all obey the same rule
+(superuser/staff = all **enabled** sources).
+
+---
+
+## Data sources (plugin/adapter architecture)
+
+Every source is an adapter subclassing `BaseSource`
+(`apps/sources/adapters/base.py`). A registry (`registry.py`) maps
+`adapter_key` → adapter class.
+
+All marketplaces the client requested (the highest-quality federal ETPs in the
+EIS unified registry, under 44-FZ and 223-FZ): **EIS, Sberbank-AST, RTS-tender,
+B2B-Center, Fabrikant, OTC.ru** — all wired into the pipeline and filterable by
+site.
+
+| Source        | Status                                          |
 |---------------|-------------------------------------------------|
-| **EIS** (zakupki.gov.ru) | ✅ Jonli — ochiq RSS eksporti orqali (44-FZ + 223-FZ) |
-| Sberbank-AST, RTS-tender, B2B-Center, Fabrikant, OTC.ru | ✅ Ulangan — hozircha real ko‘rinishdagi ma’lumot bilan; har maydoncha uchun jonli endpoint/akkreditatsiya integratsiyasi keyingi qadam (`fetch_live` seam tayyor) |
+| **EIS** (zakupki.gov.ru) | ✅ Live — real scraping of the search results page (44-FZ + 223-FZ): number, title, customer, initial price (NMC), dates, and real document files from the documents tab |
+| Sberbank-AST, RTS-tender, B2B-Center, Fabrikant, OTC.ru | ✅ Wired — currently served with realistic sample data; live per-platform endpoint/accreditation integration is the next step (a `fetch_live` seam is ready) |
 
-**Yangi manba qo‘shish:** `BaseSource`’dan klass yozing, `@register` bilan
-ro‘yxatdan o‘tkazing, `fetch()` ni implementatsiya qiling. Boshqa hech narsa
-o‘zgarmaydi — UI, filtr, ruxsatlar avtomatik qo‘llab-quvvatlaydi.
+**Add a new source:** write a `BaseSource` subclass, register it with
+`@register`, implement `fetch()`. Nothing else changes — the UI, filters and
+permissions support it automatically.
 
-EIS adapteri RSS’ni tanlaydi, chunki u captcha/login talab qilmaydigan, barqaror
-va parslash oson interfeys (HTML scraping’dan ko‘ra ishonchli). Tijorat ЭТП lari
-akkreditatsiya/JS talab qiladi — shuning uchun ular `fetch_live` seam bilan
-tayyor turadi, demo esa real ko‘rinishdagi ma’lumot bilan to‘liq ishlaydi.
+### How EIS parsing works
 
-### Hujjatlarni yuklab olish (ТЗ)
+EIS is scraped from its **search results page**
+(`/epz/order/extendedsearch/results.html`), which returns static HTML cards with
+all the real fields (registry number, object/title, customer, initial price,
+publish/deadline dates). Each tender is then enriched from its **documents tab**
+(`.../view/documents.html`), where real attachments (technical spec, contract
+draft, NMC justification) are exposed as `filestore` download links.
 
-Yig‘ish vaqtida tenderda hujjat (ТЗ va h.k.) bo‘lsa, fayl o‘z xotiramizga
-(`MEDIA_ROOT`) yuklab olinadi — havola yo‘qolsa ham saqlanib qoladi. Bu
-`DOWNLOAD_DOCUMENTS` bilan boshqariladi, `DOCUMENT_MAX_BYTES` limiti bor.
-Yuklash best-effort + izolyatsiyalangan: sinsa, faqat `download_error` yoziladi.
+Prices follow the Russian format (space = thousands, comma = decimal): a single
+comma **or** dot is treated as the decimal separator, so `13 704 946,33` is
+stored as `13704946.33` (no 100× errors).
 
-> **Offline rejim:** sandbox/konteynerda saytlarga chiqish bo‘lmasa, `seed_demo`
-> har bir manba uchun real ko‘rinishdagi namuna tenderlarni yuklaydi — demo hech
-> qachon bo‘sh qolmaydi. Tarmoq bo‘lsa EIS jonli RSS fetch birinchi ishlaydi.
+### Document download
 
-> **Til:** UI to‘liq **inglizcha**. Tender mazmuni (sarlavha, mijoz) manba
-> tilida (rus) saqlanadi — bu real xarid ma’lumoti.
+When a tender has attachments (technical spec, etc.), the file is downloaded
+into our own storage (`MEDIA_ROOT`) so it survives even if the source removes
+the link. Controlled by `DOWNLOAD_DOCUMENTS`, bounded by `DOCUMENT_MAX_BYTES`.
+Downloads are best-effort and isolated: on failure only `download_error` is
+recorded. Files are saved under their real name (from the attachment title).
+
+> **UI language:** the interface is fully **English**. Tender content (title,
+> customer) is kept in the source language (Russian) — it's real procurement
+> data.
+
+> **Offline mode:** if the machine can't reach the marketplaces, `seed_demo`
+> loads realistic sample tenders per source so the demo is never empty. With
+> network access, the live EIS scrape runs first.
 
 ---
 
-## Barqarorlik
+## Reliability
 
-- Har bir tashqi so‘rov `http_get`’da **timeout + eksponensial retry** (tenacity)
-  bilan; xatolar bitta `SourceFetchError` tipiga yig‘iladi.
-- **Izolyatsiya:** bitta manba sinsa, `collect_from_source` xatoni ushlaydi va
-  qolgan manbalar yig‘ilishda davom etadi (`collect_all`).
-- To‘liq **logging** (`apps.*` loggerlari): nima yig‘ildi, qayerda xato.
-- Dublikatlar yo‘q: `(source, external_id)` bo‘yicha unique + `update_or_create`.
+- Every outbound request goes through `http_get` with a **timeout + exponential
+  retry** (tenacity); errors collapse into a single `SourceFetchError` type.
+- **Isolation:** if one source breaks, `collect_from_source` captures the error
+  and the remaining sources keep collecting (`collect_all`).
+- Full **logging** (`apps.*` loggers): what was collected, where it failed.
+- No duplicates: unique on `(source, external_id)` + `update_or_create`.
 
 ---
 
-## Real ma’lumot yig’ish (host + VPN, Docker’siz) ⭐
+## Real data collection (host + VPN)
 
-zakupki.gov.ru faqat **Rossiya IP**’dan kiradi va **Docker konteynerlari host
-VPN’idan o’tmaydi**. Shuning uchun real jonli yig’ishni **host’da** (tizim
-darajasidagi RU VPN yoqilgan) Docker’siz ishlating — nol infratuzilma (SQLite):
+zakupki.gov.ru only accepts **Russian IPs**, and **Docker containers do not
+route through a host VPN**. So run the real live collection **on the host**
+(with a system-level Russian VPN enabled), Docker-free — zero infrastructure
+(SQLite):
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Tizim VPN (OpenVPN, RU) yoqilgan bo’lsin. Tekshirish:
-#   curl https://zakupki.gov.ru   → ochilishi kerak
+# Enable a system VPN (OpenVPN, RU). Verify:
+#   curl https://zakupki.gov.ru   → should respond
 
 set USE_SQLITE=1
 set DJANGO_SECRET_KEY=dev
 set DOWNLOAD_DOCUMENTS=1
 python manage.py migrate
-python manage.py collect --source eis --limit 10   # jonli real EIS + fayllar
+python manage.py collect --source eis --limit 10   # live real EIS + files
 python manage.py runserver
 ```
 
-So’ng http://127.0.0.1:8000 — real tenderlar, real narx/mijoz/sana va yuklab
-olingan real ТЗ fayllari ko’rinadi. Avtomatik yig’ish uchun Celery beat (quyida)
-yoki `collect` ni rejaga qo’ying. Ishlab chiqarishda eng ishonchli — **RU VPS**:
-u yerda Docker ham to’g’ridan-to’g’ri zakupki’ga chiqadi, hammasi 24/7 ishlaydi.
+Then open http://127.0.0.1:8000 — real tenders with real price/customer/dates
+and downloaded technical-spec files. For automatic collection use Celery beat
+(below) or schedule `collect`. For production the most reliable option is a
+**Russian VPS**: there Docker reaches zakupki.gov.ru directly and everything
+runs 24/7.
 
-## Lokal ishga tushirish (Docker’siz)
+## Local run (without Docker, PostgreSQL)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# PostgreSQL kerak. .env’da POSTGRES_HOST=localhost qo‘ying.
+# PostgreSQL required. Set POSTGRES_HOST=localhost in .env.
 export DJANGO_SECRET_KEY=dev
 python manage.py migrate
 python manage.py seed_demo
 python manage.py runserver
 
-# Celery (alohida terminallarda):
+# Celery (in separate terminals):
 celery -A config worker -l info
 celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
 ```
 
-## Testlar
+## Manual collection
 
 ```bash
-# Docker bilan:
+python manage.py collect                 # all enabled sources
+python manage.py collect --source eis --limit 20
+```
+
+Staff users can also trigger a run from the dashboard with the **“Scan now”**
+button.
+
+## Tests
+
+```bash
+# With Docker:
 docker compose exec web pytest
 
-# Lokal (PostgreSQL ishlab turishi kerak):
+# Local (PostgreSQL running), or zero-infra with SQLite:
 pytest
+USE_SQLITE=1 pytest
 ```
 
 ---
 
-## Loyiha tuzilmasi
+## Project structure
 
 ```
 config/                 # settings, urls, celery, wsgi/asgi
 apps/
-  accounts/             # auth view’lar + User admin’ga source-access inline
+  accounts/             # auth views + source-access inline on the User admin
   sources/              # Source, UserSourcePermission, permissions
-    adapters/           # base, registry, eis (real), stubs (tijorat), sample_data
+    adapters/           # base, registry, eis (real), stubs (commercial), sample_data
   tenders/              # Tender/TenderDocument, services, tasks, views, API
-    management/commands/seed_demo.py
-  notifications/        # Telegram skeleti (config bilan yoqiladi)
+    management/commands/ # seed_demo, collect
+  notifications/        # Telegram skeleton (enabled via config)
 templates/              # base, accounts/login, tenders/{list,detail,dashboard}
-tests/                  # pytest: permissions, models, adapters, services, views
+tests/                  # pytest: permissions, models, adapters, services, views, documents
 docker/                 # entrypoint + wait_for_db
 ```
 
 ## API
 
-`/api/tenders/` — read-only, foydalanuvchining ko‘rinadigan manbalariga
-chegaralangan. Filtrlar: `?q=`, `?region=`, `?fz_type=`, `?source=`,
-`?price_min=`, `?price_max=`, `?ordering=-published_at`.
+`/api/tenders/` — read-only, scoped to the user's visible sources. Filters:
+`?q=`, `?region=`, `?fz_type=`, `?source=`, `?price_min=`, `?price_max=`,
+`?ordering=-published_at`.
 
-## Telegram (opsional)
+## Telegram (optional)
 
-`.env`: `TELEGRAM_ENABLED=1`, `TELEGRAM_BOT_TOKEN=...`. So‘ng admin’da
-foydalanuvchiga **Telegram profile** (chat_id, is_active) qo‘shing. Yuborish
-primitivi tayyor (`apps/notifications/services.py`); kim qaysi tenderni oladi —
-matching qoidasi keyin kengaytiriladi.
+In `.env`: `TELEGRAM_ENABLED=1`, `TELEGRAM_BOT_TOKEN=...`. Then add a
+**Telegram profile** (chat_id, is_active) to a user in the admin. The send
+primitive is ready (`apps/notifications/services.py`); the matching rule (who
+gets notified about which tender) can be extended later.
